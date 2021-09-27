@@ -1,0 +1,9 @@
+README.md
+setup.py
+ShipthisAPI/__init__.py
+ShipthisAPI/shipthisapi.py
+shipthisapi_python.egg-info/PKG-INFO
+shipthisapi_python.egg-info/SOURCES.txt
+shipthisapi_python.egg-info/dependency_links.txt
+shipthisapi_python.egg-info/entry_points.txt
+shipthisapi_python.egg-info/top_level.txt
