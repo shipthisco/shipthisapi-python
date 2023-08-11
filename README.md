@@ -46,6 +46,10 @@ print(shipthisapi.info())
 
 print(shipthisapi.get_list(collection_name='invoice'))
 
+# Get all Sea list
+
+print(shipthisapi.get_list(collection_name="sea_shipment", params={"count": 2}))
+
 
 ```
 
