@@ -1,5 +1,7 @@
-from typing import Dict, List
 import requests
+from typing import List, Dict, Union, Any
+import json 
+
 class ShipthisAPI:
     base_api_endpoint = 'https://api.shipthis.co/api/v3/'
 
@@ -22,8 +24,11 @@ class ShipthisAPI:
             "user_type": self.user_type,
             "location": 'new_york'
         }
-        fetched_response = requests.request(method, self.base_api_endpoint + path, data=request_data or {}, headers=headers, params=query_params)
+        print(self.base_api_endpoint + path)
+        fetched_response = requests.request(method, self.base_api_endpoint + path, data=request_data or {}, headers=headers)
         result = fetched_response.json()
+
+        print(result)
         
         if fetched_response.status_code == 200:
             if result.get("success"):
@@ -82,3 +87,33 @@ class ShipthisAPI:
         #     return resp
         # else:
         return resp
+
+    def get_search_list_collection(self, collection_name: str, query_filter: str, params= None)  -> Dict:
+        path = f'incollection/{collection_name}?search_query={query_filter}'
+        get_list_response = self._make_request('GET', path)
+        if isinstance(get_list_response, str):
+            return get_list_response
+        else:
+            if get_list_response.get("items", False):
+                return get_list_response.get("items", [])
+            else:
+                return "No items found for the provided query." 
+    
+    def get_full_search_list_collection(self, collection_name: str, query_params: Dict[str, any], params= None) ->Dict:
+        strr = ''
+        for key in query_params:
+            valueQuery = query_params[key]
+            if not type(query_params[key]) is str:
+                valueQuery = json.dumps(query_params[key])
+
+            if(len(strr)==0):
+                strr += '?' + key + '=' + valueQuery
+            else:
+                strr += '&' + key + '=' + valueQuery
+    
+        path = f'incollection/{collection_name}{strr}'
+        response = self._make_request('GET', path)
+        if isinstance(response, str):
+            return response  
+        else:
+            return response
