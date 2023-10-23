@@ -24,12 +24,9 @@ class ShipthisAPI:
             "user_type": self.user_type,
             "location": 'new_york'
         }
-        print(self.base_api_endpoint + path)
         fetched_response = requests.request(method, self.base_api_endpoint + path, data=request_data or {}, headers=headers)
         result = fetched_response.json()
 
-        print(result)
-        
         if fetched_response.status_code == 200:
             if result.get("success"):
                 return result.get("data")
@@ -100,18 +97,18 @@ class ShipthisAPI:
                 return "No items found for the provided query." 
     
     def get_full_search_list_collection(self, collection_name: str, query_params: Dict[str, any], params= None) ->Dict:
-        strr = ''
+        query_path = ''
         for key in query_params:
             valueQuery = query_params[key]
             if not type(query_params[key]) is str:
                 valueQuery = json.dumps(query_params[key])
 
-            if(len(strr)==0):
-                strr += '?' + key + '=' + valueQuery
+            if(len(query_path)==0):
+                query_path += '?' + key + '=' + valueQuery
             else:
-                strr += '&' + key + '=' + valueQuery
+                query_path += '&' + key + '=' + valueQuery
     
-        path = f'incollection/{collection_name}{strr}'
+        path = f'incollection/{collection_name}{query_path}'
         response = self._make_request('GET', path)
         if isinstance(response, str):
             return response  

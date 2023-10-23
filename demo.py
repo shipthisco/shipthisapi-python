@@ -5,7 +5,12 @@ shipthisapi = ShipthisAPI(organisation='demo', x_api_key=x_api_key, region_id='u
 
 # print(shipthisapi.get_list(collection_name="invoice"))
 # print(shipthisapi.get_list(collection_name="sea_shipment", params={"count": 2}))  # count is the number of records you need
-# print(shipthisapi.get_search_list_collection(collection_name="airport",query_filter="Salekhard"))
+
+
+# Fucntion call for getting full search list with query parameteres
+
+# print(shipthisapi.get_search_list_collection(collection_name="airport",query_filter="<name>"))
+
 # query_payload = {
 #     "search_query": "Salekhard",
 #     "count": 25,
