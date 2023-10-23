@@ -24,8 +24,16 @@ class ShipthisAPI:
             "user_type": self.user_type,
             "location": 'new_york'
         }
-        fetched_response = requests.request(method, self.base_api_endpoint + path, data=request_data or {}, headers=headers)
-        result = fetched_response.json()
+        try:
+            fetched_response = requests.request(method, self.base_api_endpoint + path, data=request_data or {}, headers=headers, params=query_params)
+            fetched_response.raise_for_status() #Raise an exception for HTTP errors
+            result = fetched_response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"An error occurred while making the API request: {e}")
+        except ValueError as e:
+            print(f"An error occurred while parsing the JSON response: {e}")
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}")
 
         if fetched_response.status_code == 200:
             if result.get("success"):
