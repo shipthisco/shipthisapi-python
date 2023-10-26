@@ -1,18 +1,18 @@
 from ShipthisAPI.shipthisapi import ShipthisAPI
-
-x_api_key = '<your api key>'
+from ShipthisAPI.getCollection import get_Collection, update_delete, get_search_list_collection, get_full_search_list_collection
+x_api_key = '<Your API Key>'
 shipthisapi = ShipthisAPI(organisation='demo', x_api_key=x_api_key, region_id='usa', location_id='new_york')
 
-# print(shipthisapi.get_list(collection_name="invoice"))
+# print(shipthisapi.get_list(collection_name="airport"))
 # print(shipthisapi.get_list(collection_name="sea_shipment", params={"count": 2}))  # count is the number of records you need
 
 
-# Fucntion call for getting full search list with query parameteres
-
-# print(shipthisapi.get_search_list_collection(collection_name="airport",query_filter="<name>"))
+# # Fucntion call for getting full search list with query parameteres
+# search_data = update_delete(collection_name="airport", object_id="653a610e67c2e9c2bea3d301")
+# print(shipthisapi.delete_item(item_data=search_data))
 
 # query_payload = {
-#     "search_query": "Salekhard",
+#     "search_query": "S",
 #     "count": 25,
 #     "page": 1,
 #     "multi_sort": [{"sort_by": "created_at", "sort_order": "dsc"}],
@@ -24,5 +24,5 @@ shipthisapi = ShipthisAPI(organisation='demo', x_api_key=x_api_key, region_id='u
 #     "location": "new_york",
 #     "region_override": False,
 # }
-
-# print(shipthisapi.get_full_search_list_collection(collection_name="airport",query_params=query_payload)) 
+# search_data = get_full_search_list_collection(collection_name="airport",query_params=query_payload)
+# print(shipthisapi.get_full_search_list_collection(item_data=search_data))
