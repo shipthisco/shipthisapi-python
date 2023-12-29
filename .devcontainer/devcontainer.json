@@ -1,0 +1,21 @@
+{
+    "name": "Python 3",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": "..",
+        "args": {
+            "VARIANT": "3.9",
+            "INSTALL_NODE": "true",
+            "NODE_VERSION": "lts/*"
+        }
+    },
+    "settings": {
+        "terminal.integrated.shell.linux": "/bin/bash"
+    },
+    "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance"
+    ],
+    "forwardPorts": [],
+    "remoteUser": "root"
+}
