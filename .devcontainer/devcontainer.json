@@ -17,5 +17,6 @@
         "ms-python.vscode-pylance"
     ],
     "forwardPorts": [],
+    "mounts": ["source=${localEnv:HOME}/.ssh,target=/root/.ssh,type=bind"],
     "remoteUser": "root"
 }
