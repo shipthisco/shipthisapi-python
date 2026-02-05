@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
      name='shipthisapi-python',  
-     version='1.3.1',
+     version='2.1.0',
      author="Mayur Rawte",
      author_email="mayur@shipthis.co",
      description="ShipthisAPI utility package",
