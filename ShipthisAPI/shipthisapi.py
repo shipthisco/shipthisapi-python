@@ -1,116 +1,962 @@
-from typing import Dict, List
+"""Shipthis API Client.
+
+A Python client for the Shipthis public API.
+
+Usage:
+    from ShipthisAPI import ShipthisAPI
+
+    client = ShipthisAPI(
+        organisation="your_org_id",
+        x_api_key="your_api_key",
+        region_id="your_region",
+        location_id="your_location"
+    )
+
+    # Connect and validate
+    client.connect()
+
+    # Get items from a collection
+    items = client.get_list("shipment")
+
+    # Get a single item
+    item = client.get_one_item("shipment", doc_id="abc123")
+"""
+
+from typing import Any, Dict, List, Optional, Union
+import json
 import requests
 
 
+class ShipthisAPIError(Exception):
+    """Base exception for Shipthis API errors."""
+
+    def __init__(self, message: str, status_code: int = None, details: dict = None):
+        self.message = message
+        self.status_code = status_code
+        self.details = details or {}
+        super().__init__(self.message)
+
+
+class ShipthisAuthError(ShipthisAPIError):
+    """Raised when authentication fails."""
+
+    pass
+
+
+class ShipthisRequestError(ShipthisAPIError):
+    """Raised when a request fails."""
+
+    pass
+
+
 class ShipthisAPI:
-    base_api_endpoint = "https://api.shipthis.co/api/v3/"
+    """Shipthis API client for public API access.
+
+    Attributes:
+        base_api_endpoint: The base URL for the API.
+        organisation_id: Your organisation ID.
+        x_api_key: Your API key.
+        user_type: User type for requests (default: "employee").
+        region_id: Region ID for requests.
+        location_id: Location ID for requests.
+        timeout: Request timeout in seconds.
+    """
+
+    DEFAULT_TIMEOUT = 30
+    BASE_API_ENDPOINT = "https://api.shipthis.co/api/v3/"
 
     def __init__(
         self,
         organisation: str,
         x_api_key: str,
-        user_type="employee",
+        user_type: str = "employee",
         region_id: str = None,
         location_id: str = None,
+        timeout: int = None,
+        base_url: str = None,
     ) -> None:
+        """Initialize the Shipthis API client.
+
+        Args:
+            organisation: Your organisation ID.
+            x_api_key: Your API key.
+            user_type: User type for requests (default: "employee").
+            region_id: Region ID for requests.
+            location_id: Location ID for requests.
+            timeout: Request timeout in seconds (default: 30).
+            base_url: Custom base URL (optional, for testing).
+        """
+        if not organisation:
+            raise ValueError("organisation is required")
+        if not x_api_key:
+            raise ValueError("x_api_key is required")
+
         self.x_api_key = x_api_key
         self.organisation_id = organisation
         self.user_type = user_type
         self.region_id = region_id
         self.location_id = location_id
+        self.timeout = timeout or self.DEFAULT_TIMEOUT
+        self.base_api_endpoint = base_url or self.BASE_API_ENDPOINT
+        self.organisation_info = None
+        self.is_connected = False
 
-    def set_region_location(self, region_id, location_id):
+    def set_region_location(self, region_id: str, location_id: str) -> None:
+        """Set the region and location for subsequent requests.
+
+        Args:
+            region_id: Region ID.
+            location_id: Location ID.
+        """
         self.region_id = region_id
         self.location_id = location_id
 
-    def _make_request(
-        self, method: str, path: str, query_params: str = None, request_data=None
-    ) -> None:
+    def _get_headers(self) -> Dict[str, str]:
+        """Build request headers.
+
+        Returns:
+            Dictionary of headers.
+        """
         headers = {
             "x-api-key": self.x_api_key,
             "organisation": self.organisation_id,
-            "user_type": self.user_type,
-            "location": "new_york",
+            "usertype": self.user_type,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
         }
-        fetched_response = requests.request(
-            method,
-            self.base_api_endpoint + path,
-            data=request_data or {},
-            headers=headers,
-            params=query_params,
-        )
-        result = fetched_response.json()
+        if self.region_id:
+            headers["region"] = self.region_id
+        if self.location_id:
+            headers["location"] = self.location_id
+        return headers
 
-        if fetched_response.status_code == 200:
+    def _make_request(
+        self,
+        method: str,
+        path: str,
+        query_params: Dict[str, Any] = None,
+        request_data: Dict[str, Any] = None,
+    ) -> Dict[str, Any]:
+        """Make an HTTP request to the API.
+
+        Args:
+            method: HTTP method (GET, POST, PUT, PATCH, DELETE).
+            path: API endpoint path.
+            query_params: Query parameters.
+            request_data: Request body data.
+
+        Returns:
+            API response data.
+
+        Raises:
+            ShipthisAuthError: If authentication fails.
+            ShipthisRequestError: If the request fails.
+        """
+        url = self.base_api_endpoint + path
+        headers = self._get_headers()
+
+        try:
+            if request_data:
+                response = requests.request(
+                    method,
+                    url,
+                    json=request_data,
+                    headers=headers,
+                    params=query_params,
+                    timeout=self.timeout,
+                )
+            else:
+                response = requests.request(
+                    method,
+                    url,
+                    headers=headers,
+                    params=query_params,
+                    timeout=self.timeout,
+                )
+        except requests.exceptions.Timeout:
+            raise ShipthisRequestError(
+                message="Request timed out",
+                status_code=408,
+            )
+        except requests.exceptions.ConnectionError as e:
+            raise ShipthisRequestError(
+                message=f"Connection error: {str(e)}",
+                status_code=0,
+            )
+        except requests.exceptions.RequestException as e:
+            raise ShipthisRequestError(
+                message=f"Request failed: {str(e)}",
+                status_code=0,
+            )
+
+        # Handle authentication errors
+        if response.status_code == 401:
+            raise ShipthisAuthError(
+                message="Authentication failed. Check your API key.",
+                status_code=401,
+            )
+        if response.status_code == 403:
+            raise ShipthisAuthError(
+                message="Access denied. Check your permissions.",
+                status_code=403,
+            )
+
+        # Parse response
+        try:
+            result = response.json()
+        except json.JSONDecodeError:
+            raise ShipthisRequestError(
+                message=f"Invalid JSON response: {response.text[:200]}",
+                status_code=response.status_code,
+            )
+
+        # Handle success
+        if response.status_code in [200, 201]:
             if result.get("success"):
                 return result.get("data")
             else:
-                error_message = (
-                    result.get("errors")
-                    or "API call failed. Please check your internet connection or try again later"
+                errors = result.get("errors", [])
+                if errors and isinstance(errors, list) and len(errors) > 0:
+                    error_msg = errors[0].get("message", "Unknown error")
+                else:
+                    error_msg = result.get("message", "API call failed")
+                raise ShipthisRequestError(
+                    message=error_msg,
+                    status_code=response.status_code,
+                    details=result,
                 )
-                return (
-                    error_message[0].get("message")
-                    if error_message[0].get("message")
-                    else "Please provide the necessary requirements or try again later"
-                )
+
+        # Handle other error status codes
+        raise ShipthisRequestError(
+            message=f"Request failed with status {response.status_code}",
+            status_code=response.status_code,
+            details=result if isinstance(result, dict) else {"response": str(result)},
+        )
+
+    # ==================== Connection ====================
+
+    def connect(self) -> Dict[str, Any]:
+        """Connect and validate the API connection.
+
+        Fetches organisation info and validates region/location.
+        If no region/location is set, uses the first available one.
+
+        Returns:
+            Dictionary with region_id and location_id.
+
+        Raises:
+            ShipthisAPIError: If connection fails.
+        """
+        info = self.info()
+        self.organisation_info = info.get("organisation")
+
+        if not self.region_id or not self.location_id:
+            # Use first available region/location
+            regions = self.organisation_info.get("regions", [])
+            if regions:
+                self.region_id = regions[0].get("region_id")
+                locations = regions[0].get("locations", [])
+                if locations:
+                    self.location_id = locations[0].get("location_id")
+
+        self.is_connected = True
+        return {
+            "region_id": self.region_id,
+            "location_id": self.location_id,
+            "organisation": self.organisation_info,
+        }
+
+    def disconnect(self) -> None:
+        """Disconnect and clear credentials."""
+        self.x_api_key = None
+        self.is_connected = False
+
+    # ==================== Info ====================
+
+    def info(self) -> Dict[str, Any]:
+        """Get organisation and user info.
+
+        Returns:
+            Dictionary with organisation and user information.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+        """
+        return self._make_request("GET", "user-auth/info")
+
+    # ==================== Collection CRUD ====================
+
+    def get_one_item(
+        self,
+        collection_name: str,
+        doc_id: str = None,
+        filters: Dict[str, Any] = None,
+        only_fields: str = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Get a single item from a collection.
+
+        Args:
+            collection_name: Name of the collection.
+            doc_id: Document ID (optional, if not provided returns first item).
+            filters: Query filters (optional).
+            only_fields: Comma-separated list of fields to return.
+
+        Returns:
+            Document data or None if not found.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+        """
+        if doc_id:
+            path = f"incollection/{collection_name}/{doc_id}"
+            params = {}
+            if only_fields:
+                params["only"] = only_fields
+            return self._make_request("GET", path, query_params=params if params else None)
         else:
-            return f"Request failed with status {fetched_response.status_code}: {fetched_response.text}"
-
-    def info(self) -> Dict:
-        info_resp = self._make_request("GET", "auth/info")
-        return info_resp
-
-    def get_one_item(self, collection_name: str, params=None) -> Dict:
-        resp = self._make_request("GET", "incollection/" + collection_name)
-        if isinstance(resp, dict):
-            if resp.get("items"):
-                # return first elem
+            params = {}
+            if filters:
+                params["query_filter_v2"] = json.dumps(filters)
+            if only_fields:
+                params["only"] = only_fields
+            resp = self._make_request("GET", f"incollection/{collection_name}", params)
+            if isinstance(resp, dict) and resp.get("items"):
                 return resp.get("items")[0]
-        else:
-            return resp
+            return None
 
-    def get_list(self, collection_name: str, params=None) -> List[Dict] or str:
-        get_list_response = self._make_request(
-            "GET", "incollection/" + collection_name, params
+    def get_list(
+        self,
+        collection_name: str,
+        filters: Dict[str, Any] = None,
+        search_query: str = None,
+        page: int = 1,
+        count: int = 20,
+        only_fields: str = None,
+        sort: List[Dict[str, Any]] = None,
+        output_type: str = None,
+        meta: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Get a list of items from a collection.
+
+        Args:
+            collection_name: Name of the collection.
+            filters: Query filters (optional).
+            search_query: Search query string (optional).
+            page: Page number (default: 1).
+            count: Items per page (default: 20).
+            only_fields: Comma-separated list of fields to return (optional).
+            sort: List of sort objects [{"field": "name", "order": "asc"}] (optional).
+            output_type: Output type (optional).
+            meta: Include metadata (default: True).
+
+        Returns:
+            List of documents.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+        """
+        params = {"page": page, "count": count}
+        if filters:
+            params["query_filter_v2"] = json.dumps(filters)
+        if search_query:
+            params["search_query"] = search_query
+        if only_fields:
+            params["only"] = only_fields
+        if sort:
+            params["multi_sort"] = json.dumps(sort)
+        if output_type:
+            params["output_type"] = output_type
+        if not meta:
+            params["meta"] = "false"
+
+        response = self._make_request("GET", f"incollection/{collection_name}", params)
+
+        if isinstance(response, dict):
+            return response.get("items", [])
+        return []
+
+    def search(
+        self,
+        collection_name: str,
+        query: str,
+        page: int = 1,
+        count: int = 20,
+        only_fields: str = None,
+    ) -> List[Dict[str, Any]]:
+        """Search for items in a collection.
+
+        Args:
+            collection_name: Name of the collection.
+            query: Search query string.
+            page: Page number (default: 1).
+            count: Items per page (default: 20).
+            only_fields: Comma-separated list of fields to return (optional).
+
+        Returns:
+            List of matching documents.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+        """
+        return self.get_list(
+            collection_name,
+            search_query=query,
+            page=page,
+            count=count,
+            only_fields=only_fields,
         )
-        if isinstance(get_list_response, str):
-            return get_list_response
-        else:
-            if get_list_response.get("items", False):
-                return get_list_response.get("items", [])
-            else:
-                return get_list_response
 
-    def create_item(self, collection_name: str, data=None) -> Dict:
+    def create_item(
+        self, collection_name: str, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Create a new item in a collection.
+
+        Args:
+            collection_name: Name of the collection.
+            data: Document data.
+
+        Returns:
+            Created document data.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+        """
         resp = self._make_request(
-            "POST", "incollection/" + collection_name, request_data={"reqbody": data}
+            "POST",
+            f"incollection/{collection_name}",
+            request_data={"reqbody": data},
         )
-        if isinstance(resp, dict):
-            if resp.get("data"):
-                return resp.get("data")
-        else:
-            return resp
+        if isinstance(resp, dict) and resp.get("data"):
+            return resp.get("data")
+        return resp
 
     def update_item(
-        self, collection_name: str, object_id: str, updated_data=None
-    ) -> Dict:
+        self,
+        collection_name: str,
+        object_id: str,
+        updated_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Update an existing item (full replacement).
+
+        Args:
+            collection_name: Name of the collection.
+            object_id: Document ID.
+            updated_data: Updated document data.
+
+        Returns:
+            Updated document data.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+        """
         resp = self._make_request(
             "PUT",
-            "incollection/" + collection_name + "/" + object_id,
+            f"incollection/{collection_name}/{object_id}",
             request_data={"reqbody": updated_data},
         )
-        if isinstance(resp, dict):
-            if resp.get("data"):
-                return resp.get("data")
-        else:
-            return resp
-
-    def delete_item(self, collection_name: str, object_id: str) -> Dict:
-        resp = self._make_request(
-            "DELETE", "incollection/" + collection_name + "/" + object_id
-        )
-        # if  isinstance(resp, str):
-        #     return resp
-        # else:
+        if isinstance(resp, dict) and resp.get("data"):
+            return resp.get("data")
         return resp
+
+    def patch_item(
+        self,
+        collection_name: str,
+        object_id: str,
+        update_fields: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Patch specific fields of an item.
+
+        Args:
+            collection_name: Name of the collection.
+            object_id: Document ID.
+            update_fields: Fields to update.
+
+        Returns:
+            Updated document data.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+        """
+        return self._make_request(
+            "PATCH",
+            f"incollection/{collection_name}/{object_id}",
+            request_data={"update_fields": update_fields},
+        )
+
+    def delete_item(self, collection_name: str, object_id: str) -> Dict[str, Any]:
+        """Delete an item.
+
+        Args:
+            collection_name: Name of the collection.
+            object_id: Document ID.
+
+        Returns:
+            Deletion response.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+        """
+        return self._make_request(
+            "DELETE",
+            f"incollection/{collection_name}/{object_id}",
+        )
+
+    # ==================== Workflow Operations ====================
+
+    def get_job_status(
+        self, collection_name: str, object_id: str
+    ) -> Dict[str, Any]:
+        """Get the job status for a document.
+
+        Args:
+            collection_name: Name of the collection.
+            object_id: Document ID.
+
+        Returns:
+            Job status data.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+        """
+        return self._make_request(
+            "GET",
+            f"workflow/{collection_name}/job_status/{object_id}",
+        )
+
+    def set_job_status(
+        self,
+        collection_name: str,
+        object_id: str,
+        action_index: int,
+    ) -> Dict[str, Any]:
+        """Set the job status for a document.
+
+        Args:
+            collection_name: Name of the collection.
+            object_id: Document ID.
+            action_index: The index of the action to execute.
+
+        Returns:
+            Updated status data.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+        """
+        return self._make_request(
+            "POST",
+            f"workflow/{collection_name}/job_status/{object_id}",
+            request_data={"action_index": action_index},
+        )
+
+    def get_workflow(self, object_id: str) -> Dict[str, Any]:
+        """Get a workflow configuration.
+
+        Args:
+            object_id: Workflow ID.
+
+        Returns:
+            Workflow data.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+        """
+        return self._make_request("GET", f"incollection/workflow/{object_id}")
+
+    # ==================== Reports ====================
+
+    def get_report_view(
+        self,
+        report_name: str,
+        start_date: str,
+        end_date: str,
+        post_data: Dict[str, Any] = None,
+        output_type: str = "json",
+        skip_meta: bool = True,
+    ) -> Dict[str, Any]:
+        """Get a report view.
+
+        Args:
+            report_name: Name of the report.
+            start_date: Start date (YYYY-MM-DD or timestamp).
+            end_date: End date (YYYY-MM-DD or timestamp).
+            post_data: Additional filter data (optional).
+            output_type: Output format (default: "json").
+            skip_meta: Skip metadata (default: True).
+
+        Returns:
+            Report data.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+        """
+        params = {
+            "start_date": start_date,
+            "end_date": end_date,
+            "output_type": output_type,
+            "skip_meta": "true" if skip_meta else "false",
+        }
+        if self.location_id:
+            params["location"] = self.location_id
+
+        return self._make_request(
+            "POST",
+            f"report-view/{report_name}",
+            query_params=params,
+            request_data=post_data,
+        )
+
+    # ==================== Third-party Services ====================
+
+    def get_exchange_rate(
+        self,
+        source_currency: str,
+        target_currency: str = "USD",
+        date: int = None,
+    ) -> Dict[str, Any]:
+        """Get exchange rate between currencies.
+
+        Args:
+            source_currency: Source currency code (e.g., "EUR").
+            target_currency: Target currency code (default: "USD").
+            date: Date timestamp in milliseconds (optional, defaults to now).
+
+        Returns:
+            Exchange rate data.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+        """
+        import time
+        if date is None:
+            date = int(time.time() * 1000)
+
+        return self._make_request(
+            "GET",
+            f"thirdparty/currency?source={source_currency}&target={target_currency}&date={date}",
+        )
+
+    def autocomplete(
+        self,
+        reference_name: str,
+        data: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """Get autocomplete suggestions for a reference field.
+
+        Args:
+            reference_name: Name of the reference (e.g., "port", "airport").
+            data: Search data with query.
+
+        Returns:
+            List of suggestions.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+        """
+        params = {}
+        if self.location_id:
+            params["location"] = self.location_id
+
+        return self._make_request(
+            "POST",
+            f"autocomplete-reference/{reference_name}",
+            query_params=params if params else None,
+            request_data=data,
+        )
+
+    def search_location(self, query: str) -> List[Dict[str, Any]]:
+        """Search for locations using Google Places.
+
+        Args:
+            query: Search query string.
+
+        Returns:
+            List of location suggestions.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+        """
+        return self._make_request(
+            "GET",
+            f"thirdparty/search-place-autocomplete?query={query}",
+        )
+
+    def get_place_details(
+        self,
+        place_id: str,
+        description: str = "",
+    ) -> Dict[str, Any]:
+        """Get details for a Google Place.
+
+        Args:
+            place_id: Google Place ID.
+            description: Place description (optional).
+
+        Returns:
+            Place details.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+        """
+        return self._make_request(
+            "GET",
+            f"thirdparty/select-google-place?query={place_id}&description={description}",
+        )
+
+    # ==================== Conversations ====================
+
+    def create_conversation(
+        self,
+        view_name: str,
+        document_id: str,
+        conversation_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Create a conversation/message on a document.
+
+        Args:
+            view_name: Collection/view name.
+            document_id: Document ID.
+            conversation_data: Conversation data (message, type, etc.).
+
+        Returns:
+            Created conversation data.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+        """
+        payload = {
+            "conversation": conversation_data,
+            "document_id": document_id,
+            "view_name": view_name,
+            "message_type": conversation_data.get("type", ""),
+        }
+        return self._make_request("POST", "conversation", request_data=payload)
+
+    def get_conversations(
+        self,
+        view_name: str,
+        document_id: str,
+        message_type: str = "all",
+        page: int = 1,
+        count: int = 100,
+    ) -> Dict[str, Any]:
+        """Get conversations for a document.
+
+        Args:
+            view_name: Collection/view name.
+            document_id: Document ID.
+            message_type: Filter by message type (default: "all").
+            page: Page number (default: 1).
+            count: Items per page (default: 100).
+
+        Returns:
+            Conversations data.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+        """
+        params = {
+            "view_name": view_name,
+            "document_id": document_id,
+            "page": str(page),
+            "count": str(count),
+            "message_type": message_type,
+            "version": "2",
+        }
+        return self._make_request("GET", "conversation", query_params=params)
+
+    # ==================== Bulk Operations ====================
+
+    def bulk_edit(
+        self,
+        collection_name: str,
+        ids: List[str],
+        update_data: Dict[str, Any],
+        external_update_data: Dict[str, Any] = None,
+    ) -> Dict[str, Any]:
+        """Bulk edit multiple items in a collection.
+
+        Args:
+            collection_name: Name of the collection.
+            ids: List of document IDs to update.
+            update_data: Key-value pairs of fields to update.
+            external_update_data: Extra data for external updates (optional).
+
+        Returns:
+            Update response.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+
+        Example:
+            client.bulk_edit(
+                "customer",
+                ids=["5fdc00487f7636c97b9fa064", "608fe19fc33215427867f34e"],
+                update_data={"company.fax_no": "12323231", "address.state": "California"}
+            )
+        """
+        payload = {
+            "data": {
+                "ids": ids,
+                "update_data": update_data,
+            }
+        }
+        if external_update_data:
+            payload["data"]["external_update_data"] = external_update_data
+
+        return self._make_request(
+            "POST",
+            f"incollection_group_edit/{collection_name}",
+            request_data=payload,
+        )
+
+    # ==================== Workflow Actions ====================
+
+    def primary_workflow_action(
+        self,
+        collection: str,
+        workflow_id: str,
+        object_id: str,
+        action_index: int,
+        intended_state_id: str,
+        start_state_id: str = None,
+    ) -> Dict[str, Any]:
+        """Trigger a primary workflow transition (status change on a record).
+
+        Args:
+            collection: Target collection (e.g., "pickup_delivery", "sea_shipment").
+            workflow_id: Workflow status key (e.g., "job_status").
+            object_id: The document's ID.
+            action_index: Index of action within the status.
+            intended_state_id: Intended resulting state ID (e.g., "ops_complete").
+            start_state_id: Current/starting state ID (optional).
+
+        Returns:
+            Workflow action response with success status and resulting state.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+
+        Example:
+            client.primary_workflow_action(
+                collection="pickup_delivery",
+                workflow_id="job_status",
+                object_id="68a4f906743189ad061429a7",
+                action_index=0,
+                intended_state_id="ops_complete",
+                start_state_id="closed"
+            )
+        """
+        payload = {
+            "action_index": action_index,
+            "intended_state_id": intended_state_id,
+        }
+        if start_state_id:
+            payload["start_state_id"] = start_state_id
+
+        return self._make_request(
+            "POST",
+            f"workflow/{collection}/{workflow_id}/{object_id}",
+            request_data=payload,
+        )
+
+    def secondary_workflow_action(
+        self,
+        collection: str,
+        workflow_id: str,
+        object_id: str,
+        target_state: str,
+        additional_data: Dict[str, Any] = None,
+    ) -> Dict[str, Any]:
+        """Trigger a secondary workflow transition (sub-status change).
+
+        Args:
+            collection: Target collection (e.g., "pickup_delivery").
+            workflow_id: Secondary status key (e.g., "driver_status").
+            object_id: The document's ID.
+            target_state: Resulting sub-state (e.g., "to_pick_up").
+            additional_data: Optional additional data to send with the request.
+
+        Returns:
+            Workflow action response.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+
+        Example:
+            client.secondary_workflow_action(
+                collection="pickup_delivery",
+                workflow_id="driver_status",
+                object_id="67ed10859b7cf551a19f813e",
+                target_state="to_pick_up"
+            )
+        """
+        payload = additional_data or {}
+
+        return self._make_request(
+            "POST",
+            f"workflow/{collection}/{workflow_id}/{object_id}/{target_state}",
+            request_data=payload,
+        )
+
+    # ==================== File Upload ====================
+
+    def upload_file(
+        self,
+        file_path: str,
+        file_name: str = None,
+    ) -> Dict[str, Any]:
+        """Upload a file.
+
+        Args:
+            file_path: Path to the file to upload.
+            file_name: Custom file name (optional).
+
+        Returns:
+            Upload response with file URL.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+        """
+        import os
+
+        if file_name is None:
+            file_name = os.path.basename(file_path)
+
+        upload_url = self.base_api_endpoint.replace("/api/v3/", "").rstrip("/")
+        upload_url = upload_url.replace("api.", "upload.")
+        upload_url = f"{upload_url}/api/v3/file-upload"
+
+        headers = self._get_headers()
+        # Remove Content-Type for multipart
+        headers.pop("Content-Type", None)
+
+        try:
+            with open(file_path, "rb") as f:
+                files = {"file": (file_name, f)}
+                response = requests.post(
+                    upload_url,
+                    headers=headers,
+                    files=files,
+                    timeout=self.timeout * 2,  # Double timeout for uploads
+                )
+        except FileNotFoundError:
+            raise ShipthisRequestError(
+                message=f"File not found: {file_path}",
+                status_code=0,
+            )
+        except requests.exceptions.RequestException as e:
+            raise ShipthisRequestError(
+                message=f"Upload failed: {str(e)}",
+                status_code=0,
+            )
+
+        if response.status_code == 200:
+            try:
+                return response.json()
+            except json.JSONDecodeError:
+                return {"url": response.text}
+
+        raise ShipthisRequestError(
+            message=f"Upload failed with status {response.status_code}",
+            status_code=response.status_code,
+        )
