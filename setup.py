@@ -5,15 +5,18 @@ with open("README.md", "r") as fh:
 
 
 setuptools.setup(
-     name='shipthisapi-python',  
-     version='2.2.0',
+     name='shipthisapi-python',
+     version='3.0.0',
      author="Mayur Rawte",
      author_email="mayur@shipthis.co",
-     description="ShipthisAPI utility package",
+     description="ShipthisAPI async utility package",
      long_description=long_description,
      long_description_content_type="text/markdown",
      url="https://github.com/shipthisco/shipthisapi-python",
      packages=setuptools.find_packages(),
+     install_requires=[
+         "httpx>=0.24.0",
+     ],
      classifiers=[
          "Programming Language :: Python :: 3",
          "License :: OSI Approved :: MIT License",

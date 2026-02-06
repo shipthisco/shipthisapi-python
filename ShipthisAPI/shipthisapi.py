@@ -1,34 +1,35 @@
 """Shipthis API Client.
 
-A Python client for the Shipthis public API.
+An async Python client for the Shipthis public API.
 
 Usage:
+    import asyncio
     from ShipthisAPI import ShipthisAPI
 
-    # Initialize the client
-    client = ShipthisAPI(
-        organisation="your_org_id",
-        x_api_key="your_api_key",
-        region_id="your_region",
-        location_id="your_location"
-    )
+    async def main():
+        # Initialize the client
+        client = ShipthisAPI(
+            organisation="your_org_id",
+            x_api_key="your_api_key",
+            region_id="your_region",
+            location_id="your_location"
+        )
 
-    # Connect and validate
-    client.connect()
+        # Connect and validate
+        await client.connect()
 
-    # Get items from a collection
-    items = client.get_list("shipment")
+        # Get items from a collection
+        items = await client.get_list("shipment")
 
-    # Get a single item
-    item = client.get_one_item("shipment", doc_id="abc123")
+        # Patch document fields
+        await client.patch_item("fcl_load", doc_id, {"status": "completed"})
 
-    # Webhook sync update
-    client.webhook_sync("fcl_load", doc_id, fields=[{"status": "completed"}])
+    asyncio.run(main())
 """
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 import json
-import requests
+import httpx
 
 
 class ShipthisAPIError(Exception):
@@ -54,7 +55,7 @@ class ShipthisRequestError(ShipthisAPIError):
 
 
 class ShipthisAPI:
-    """Shipthis API client for public API access.
+    """Async Shipthis API client for public API access.
 
     Attributes:
         base_api_endpoint: The base URL for the API.
@@ -91,7 +92,7 @@ class ShipthisAPI:
             location_id: Location ID for requests.
             timeout: Request timeout in seconds (default: 30).
             base_url: Custom base URL (optional, for testing).
-            custom_headers: Custom headers that override defaults (e.g., for server-to-server auth).
+            custom_headers: Custom headers that override defaults.
         """
         if not organisation:
             raise ValueError("organisation is required")
@@ -145,7 +146,7 @@ class ShipthisAPI:
             headers.update(override_headers)
         return headers
 
-    def _make_request(
+    async def _make_request(
         self,
         method: str,
         path: str,
@@ -153,7 +154,7 @@ class ShipthisAPI:
         request_data: Dict[str, Any] = None,
         headers: Dict[str, str] = None,
     ) -> Dict[str, Any]:
-        """Make an HTTP request to the API.
+        """Make an async HTTP request to the API.
 
         Args:
             method: HTTP method (GET, POST, PUT, PATCH, DELETE).
@@ -172,39 +173,30 @@ class ShipthisAPI:
         url = self.base_api_endpoint + path
         request_headers = self._get_headers(headers)
 
-        try:
-            if request_data:
-                response = requests.request(
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            try:
+                response = await client.request(
                     method,
                     url,
+                    headers=request_headers,
+                    params=query_params,
                     json=request_data,
-                    headers=request_headers,
-                    params=query_params,
-                    timeout=self.timeout,
                 )
-            else:
-                response = requests.request(
-                    method,
-                    url,
-                    headers=request_headers,
-                    params=query_params,
-                    timeout=self.timeout,
+            except httpx.TimeoutException:
+                raise ShipthisRequestError(
+                    message="Request timed out",
+                    status_code=408,
                 )
-        except requests.exceptions.Timeout:
-            raise ShipthisRequestError(
-                message="Request timed out",
-                status_code=408,
-            )
-        except requests.exceptions.ConnectionError as e:
-            raise ShipthisRequestError(
-                message=f"Connection error: {str(e)}",
-                status_code=0,
-            )
-        except requests.exceptions.RequestException as e:
-            raise ShipthisRequestError(
-                message=f"Request failed: {str(e)}",
-                status_code=0,
-            )
+            except httpx.ConnectError as e:
+                raise ShipthisRequestError(
+                    message=f"Connection error: {str(e)}",
+                    status_code=0,
+                )
+            except httpx.RequestError as e:
+                raise ShipthisRequestError(
+                    message=f"Request failed: {str(e)}",
+                    status_code=0,
+                )
 
         # Handle authentication errors
         if response.status_code == 401:
@@ -252,7 +244,7 @@ class ShipthisAPI:
 
     # ==================== Connection ====================
 
-    def connect(self) -> Dict[str, Any]:
+    async def connect(self) -> Dict[str, Any]:
         """Connect and validate the API connection.
 
         Fetches organisation info and validates region/location.
@@ -264,7 +256,7 @@ class ShipthisAPI:
         Raises:
             ShipthisAPIError: If connection fails.
         """
-        info = self.info()
+        info = await self.info()
         self.organisation_info = info.get("organisation")
 
         if not self.region_id or not self.location_id:
@@ -290,7 +282,7 @@ class ShipthisAPI:
 
     # ==================== Info ====================
 
-    def info(self) -> Dict[str, Any]:
+    async def info(self) -> Dict[str, Any]:
         """Get organisation and user info.
 
         Returns:
@@ -299,11 +291,11 @@ class ShipthisAPI:
         Raises:
             ShipthisAPIError: If the request fails.
         """
-        return self._make_request("GET", "user-auth/info")
+        return await self._make_request("GET", "user-auth/info")
 
     # ==================== Collection CRUD ====================
 
-    def get_one_item(
+    async def get_one_item(
         self,
         collection_name: str,
         doc_id: str = None,
@@ -329,19 +321,19 @@ class ShipthisAPI:
             params = {}
             if only_fields:
                 params["only"] = only_fields
-            return self._make_request("GET", path, query_params=params if params else None)
+            return await self._make_request("GET", path, query_params=params if params else None)
         else:
             params = {}
             if filters:
                 params["query_filter_v2"] = json.dumps(filters)
             if only_fields:
                 params["only"] = only_fields
-            resp = self._make_request("GET", f"incollection/{collection_name}", params)
+            resp = await self._make_request("GET", f"incollection/{collection_name}", params)
             if isinstance(resp, dict) and resp.get("items"):
                 return resp.get("items")[0]
             return None
 
-    def get_list(
+    async def get_list(
         self,
         collection_name: str,
         filters: Dict[str, Any] = None,
@@ -386,13 +378,13 @@ class ShipthisAPI:
         if not meta:
             params["meta"] = "false"
 
-        response = self._make_request("GET", f"incollection/{collection_name}", params)
+        response = await self._make_request("GET", f"incollection/{collection_name}", params)
 
         if isinstance(response, dict):
             return response.get("items", [])
         return []
 
-    def search(
+    async def search(
         self,
         collection_name: str,
         query: str,
@@ -415,7 +407,7 @@ class ShipthisAPI:
         Raises:
             ShipthisAPIError: If the request fails.
         """
-        return self.get_list(
+        return await self.get_list(
             collection_name,
             search_query=query,
             page=page,
@@ -423,7 +415,7 @@ class ShipthisAPI:
             only_fields=only_fields,
         )
 
-    def create_item(
+    async def create_item(
         self, collection_name: str, data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Create a new item in a collection.
@@ -438,7 +430,7 @@ class ShipthisAPI:
         Raises:
             ShipthisAPIError: If the request fails.
         """
-        resp = self._make_request(
+        resp = await self._make_request(
             "POST",
             f"incollection/{collection_name}",
             request_data={"reqbody": data},
@@ -447,7 +439,7 @@ class ShipthisAPI:
             return resp.get("data")
         return resp
 
-    def update_item(
+    async def update_item(
         self,
         collection_name: str,
         object_id: str,
@@ -466,7 +458,7 @@ class ShipthisAPI:
         Raises:
             ShipthisAPIError: If the request fails.
         """
-        resp = self._make_request(
+        resp = await self._make_request(
             "PUT",
             f"incollection/{collection_name}/{object_id}",
             request_data={"reqbody": updated_data},
@@ -475,7 +467,7 @@ class ShipthisAPI:
             return resp.get("data")
         return resp
 
-    def patch_item(
+    async def patch_item(
         self,
         collection_name: str,
         object_id: str,
@@ -498,19 +490,19 @@ class ShipthisAPI:
             ShipthisAPIError: If the request fails.
 
         Example:
-            client.patch_item(
+            await client.patch_item(
                 "fcl_load",
                 "68a4f906743189ad061429a7",
                 update_fields={"container_no": "CONT123", "seal_no": "SEAL456"}
             )
         """
-        return self._make_request(
+        return await self._make_request(
             "PATCH",
             f"incollection/{collection_name}/{object_id}",
             request_data={"update_fields": update_fields},
         )
 
-    def delete_item(self, collection_name: str, object_id: str) -> Dict[str, Any]:
+    async def delete_item(self, collection_name: str, object_id: str) -> Dict[str, Any]:
         """Delete an item.
 
         Args:
@@ -523,14 +515,14 @@ class ShipthisAPI:
         Raises:
             ShipthisAPIError: If the request fails.
         """
-        return self._make_request(
+        return await self._make_request(
             "DELETE",
             f"incollection/{collection_name}/{object_id}",
         )
 
     # ==================== Workflow Operations ====================
 
-    def get_job_status(
+    async def get_job_status(
         self, collection_name: str, object_id: str
     ) -> Dict[str, Any]:
         """Get the job status for a document.
@@ -545,12 +537,12 @@ class ShipthisAPI:
         Raises:
             ShipthisAPIError: If the request fails.
         """
-        return self._make_request(
+        return await self._make_request(
             "GET",
             f"workflow/{collection_name}/job_status/{object_id}",
         )
 
-    def set_job_status(
+    async def set_job_status(
         self,
         collection_name: str,
         object_id: str,
@@ -569,13 +561,13 @@ class ShipthisAPI:
         Raises:
             ShipthisAPIError: If the request fails.
         """
-        return self._make_request(
+        return await self._make_request(
             "POST",
             f"workflow/{collection_name}/job_status/{object_id}",
             request_data={"action_index": action_index},
         )
 
-    def get_workflow(self, object_id: str) -> Dict[str, Any]:
+    async def get_workflow(self, object_id: str) -> Dict[str, Any]:
         """Get a workflow configuration.
 
         Args:
@@ -587,11 +579,11 @@ class ShipthisAPI:
         Raises:
             ShipthisAPIError: If the request fails.
         """
-        return self._make_request("GET", f"incollection/workflow/{object_id}")
+        return await self._make_request("GET", f"incollection/workflow/{object_id}")
 
     # ==================== Reports ====================
 
-    def get_report_view(
+    async def get_report_view(
         self,
         report_name: str,
         start_date: str,
@@ -625,7 +617,7 @@ class ShipthisAPI:
         if self.location_id:
             params["location"] = self.location_id
 
-        return self._make_request(
+        return await self._make_request(
             "POST",
             f"report-view/{report_name}",
             query_params=params,
@@ -634,7 +626,7 @@ class ShipthisAPI:
 
     # ==================== Third-party Services ====================
 
-    def get_exchange_rate(
+    async def get_exchange_rate(
         self,
         source_currency: str,
         target_currency: str = "USD",
@@ -657,12 +649,12 @@ class ShipthisAPI:
         if date is None:
             date = int(time.time() * 1000)
 
-        return self._make_request(
+        return await self._make_request(
             "GET",
             f"thirdparty/currency?source={source_currency}&target={target_currency}&date={date}",
         )
 
-    def autocomplete(
+    async def autocomplete(
         self,
         reference_name: str,
         data: Dict[str, Any],
@@ -683,14 +675,14 @@ class ShipthisAPI:
         if self.location_id:
             params["location"] = self.location_id
 
-        return self._make_request(
+        return await self._make_request(
             "POST",
             f"autocomplete-reference/{reference_name}",
             query_params=params if params else None,
             request_data=data,
         )
 
-    def search_location(self, query: str) -> List[Dict[str, Any]]:
+    async def search_location(self, query: str) -> List[Dict[str, Any]]:
         """Search for locations using Google Places.
 
         Args:
@@ -702,12 +694,12 @@ class ShipthisAPI:
         Raises:
             ShipthisAPIError: If the request fails.
         """
-        return self._make_request(
+        return await self._make_request(
             "GET",
             f"thirdparty/search-place-autocomplete?query={query}",
         )
 
-    def get_place_details(
+    async def get_place_details(
         self,
         place_id: str,
         description: str = "",
@@ -724,14 +716,14 @@ class ShipthisAPI:
         Raises:
             ShipthisAPIError: If the request fails.
         """
-        return self._make_request(
+        return await self._make_request(
             "GET",
             f"thirdparty/select-google-place?query={place_id}&description={description}",
         )
 
     # ==================== Conversations ====================
 
-    def create_conversation(
+    async def create_conversation(
         self,
         view_name: str,
         document_id: str,
@@ -756,9 +748,9 @@ class ShipthisAPI:
             "view_name": view_name,
             "message_type": conversation_data.get("type", ""),
         }
-        return self._make_request("POST", "conversation", request_data=payload)
+        return await self._make_request("POST", "conversation", request_data=payload)
 
-    def get_conversations(
+    async def get_conversations(
         self,
         view_name: str,
         document_id: str,
@@ -789,11 +781,11 @@ class ShipthisAPI:
             "message_type": message_type,
             "version": "2",
         }
-        return self._make_request("GET", "conversation", query_params=params)
+        return await self._make_request("GET", "conversation", query_params=params)
 
     # ==================== Bulk Operations ====================
 
-    def bulk_edit(
+    async def bulk_edit(
         self,
         collection_name: str,
         ids: List[str],
@@ -815,7 +807,7 @@ class ShipthisAPI:
             ShipthisAPIError: If the request fails.
 
         Example:
-            client.bulk_edit(
+            await client.bulk_edit(
                 "customer",
                 ids=["5fdc00487f7636c97b9fa064", "608fe19fc33215427867f34e"],
                 update_data={"company.fax_no": "12323231", "address.state": "California"}
@@ -830,7 +822,7 @@ class ShipthisAPI:
         if external_update_data:
             payload["data"]["external_update_data"] = external_update_data
 
-        return self._make_request(
+        return await self._make_request(
             "POST",
             f"incollection_group_edit/{collection_name}",
             request_data=payload,
@@ -838,7 +830,7 @@ class ShipthisAPI:
 
     # ==================== Workflow Actions ====================
 
-    def primary_workflow_action(
+    async def primary_workflow_action(
         self,
         collection: str,
         workflow_id: str,
@@ -864,7 +856,7 @@ class ShipthisAPI:
             ShipthisAPIError: If the request fails.
 
         Example:
-            client.primary_workflow_action(
+            await client.primary_workflow_action(
                 collection="pickup_delivery",
                 workflow_id="job_status",
                 object_id="68a4f906743189ad061429a7",
@@ -880,13 +872,13 @@ class ShipthisAPI:
         if start_state_id:
             payload["start_state_id"] = start_state_id
 
-        return self._make_request(
+        return await self._make_request(
             "POST",
             f"workflow/{collection}/{workflow_id}/{object_id}",
             request_data=payload,
         )
 
-    def secondary_workflow_action(
+    async def secondary_workflow_action(
         self,
         collection: str,
         workflow_id: str,
@@ -910,7 +902,7 @@ class ShipthisAPI:
             ShipthisAPIError: If the request fails.
 
         Example:
-            client.secondary_workflow_action(
+            await client.secondary_workflow_action(
                 collection="pickup_delivery",
                 workflow_id="driver_status",
                 object_id="67ed10859b7cf551a19f813e",
@@ -919,7 +911,7 @@ class ShipthisAPI:
         """
         payload = additional_data or {}
 
-        return self._make_request(
+        return await self._make_request(
             "POST",
             f"workflow/{collection}/{workflow_id}/{object_id}/{target_state}",
             request_data=payload,
@@ -927,7 +919,7 @@ class ShipthisAPI:
 
     # ==================== File Upload ====================
 
-    def upload_file(
+    async def upload_file(
         self,
         file_path: str,
         file_name: str = None,
@@ -960,18 +952,18 @@ class ShipthisAPI:
         try:
             with open(file_path, "rb") as f:
                 files = {"file": (file_name, f)}
-                response = requests.post(
-                    upload_url,
-                    headers=headers,
-                    files=files,
-                    timeout=self.timeout * 2,  # Double timeout for uploads
-                )
+                async with httpx.AsyncClient(timeout=self.timeout * 2) as client:
+                    response = await client.post(
+                        upload_url,
+                        headers=headers,
+                        files=files,
+                    )
         except FileNotFoundError:
             raise ShipthisRequestError(
                 message=f"File not found: {file_path}",
                 status_code=0,
             )
-        except requests.exceptions.RequestException as e:
+        except httpx.RequestError as e:
             raise ShipthisRequestError(
                 message=f"Upload failed: {str(e)}",
                 status_code=0,
@@ -990,7 +982,7 @@ class ShipthisAPI:
 
     # ==================== Reference Linked Fields ====================
 
-    def create_reference_linked_field(
+    async def create_reference_linked_field(
         self,
         collection_name: str,
         doc_id: str,
@@ -1010,13 +1002,13 @@ class ShipthisAPI:
             ShipthisAPIError: If the request fails.
 
         Example:
-            client.create_reference_linked_field(
+            await client.create_reference_linked_field(
                 "sea_shipment",
                 "68a4f906743189ad061429a7",
                 payload={"field_name": "containers", "data": {...}}
             )
         """
-        return self._make_request(
+        return await self._make_request(
             "POST",
             f"incollection/create-reference-linked-field/{collection_name}/{doc_id}",
             request_data=payload,
