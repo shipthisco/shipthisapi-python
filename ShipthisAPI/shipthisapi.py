@@ -5,6 +5,7 @@ A Python client for the Shipthis public API.
 Usage:
     from ShipthisAPI import ShipthisAPI
 
+    # Initialize the client
     client = ShipthisAPI(
         organisation="your_org_id",
         x_api_key="your_api_key",
@@ -20,6 +21,9 @@ Usage:
 
     # Get a single item
     item = client.get_one_item("shipment", doc_id="abc123")
+
+    # Webhook sync update
+    client.webhook_sync("fcl_load", doc_id, fields=[{"status": "completed"}])
 """
 
 from typing import Any, Dict, List, Optional, Union
@@ -60,6 +64,7 @@ class ShipthisAPI:
         region_id: Region ID for requests.
         location_id: Location ID for requests.
         timeout: Request timeout in seconds.
+        custom_headers: Custom headers to override defaults.
     """
 
     DEFAULT_TIMEOUT = 30
@@ -68,28 +73,28 @@ class ShipthisAPI:
     def __init__(
         self,
         organisation: str,
-        x_api_key: str,
+        x_api_key: str = None,
         user_type: str = "employee",
         region_id: str = None,
         location_id: str = None,
         timeout: int = None,
         base_url: str = None,
+        custom_headers: Dict[str, str] = None,
     ) -> None:
         """Initialize the Shipthis API client.
 
         Args:
             organisation: Your organisation ID.
-            x_api_key: Your API key.
+            x_api_key: Your API key (optional if using custom_headers with auth).
             user_type: User type for requests (default: "employee").
             region_id: Region ID for requests.
             location_id: Location ID for requests.
             timeout: Request timeout in seconds (default: 30).
             base_url: Custom base URL (optional, for testing).
+            custom_headers: Custom headers that override defaults (e.g., for server-to-server auth).
         """
         if not organisation:
             raise ValueError("organisation is required")
-        if not x_api_key:
-            raise ValueError("x_api_key is required")
 
         self.x_api_key = x_api_key
         self.organisation_id = organisation
@@ -98,6 +103,7 @@ class ShipthisAPI:
         self.location_id = location_id
         self.timeout = timeout or self.DEFAULT_TIMEOUT
         self.base_api_endpoint = base_url or self.BASE_API_ENDPOINT
+        self.custom_headers = custom_headers or {}
         self.organisation_info = None
         self.is_connected = False
 
@@ -111,23 +117,32 @@ class ShipthisAPI:
         self.region_id = region_id
         self.location_id = location_id
 
-    def _get_headers(self) -> Dict[str, str]:
+    def _get_headers(self, override_headers: Dict[str, str] = None) -> Dict[str, str]:
         """Build request headers.
+
+        Args:
+            override_headers: Headers to override for this specific request.
 
         Returns:
             Dictionary of headers.
         """
         headers = {
-            "x-api-key": self.x_api_key,
             "organisation": self.organisation_id,
             "usertype": self.user_type,
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
+        if self.x_api_key:
+            headers["x-api-key"] = self.x_api_key
         if self.region_id:
             headers["region"] = self.region_id
         if self.location_id:
             headers["location"] = self.location_id
+        # Apply custom headers from init
+        headers.update(self.custom_headers)
+        # Apply per-request override headers
+        if override_headers:
+            headers.update(override_headers)
         return headers
 
     def _make_request(
@@ -136,6 +151,7 @@ class ShipthisAPI:
         path: str,
         query_params: Dict[str, Any] = None,
         request_data: Dict[str, Any] = None,
+        headers: Dict[str, str] = None,
     ) -> Dict[str, Any]:
         """Make an HTTP request to the API.
 
@@ -144,6 +160,7 @@ class ShipthisAPI:
             path: API endpoint path.
             query_params: Query parameters.
             request_data: Request body data.
+            headers: Headers to override for this request.
 
         Returns:
             API response data.
@@ -153,7 +170,7 @@ class ShipthisAPI:
             ShipthisRequestError: If the request fails.
         """
         url = self.base_api_endpoint + path
-        headers = self._get_headers()
+        request_headers = self._get_headers(headers)
 
         try:
             if request_data:
@@ -161,7 +178,7 @@ class ShipthisAPI:
                     method,
                     url,
                     json=request_data,
-                    headers=headers,
+                    headers=request_headers,
                     params=query_params,
                     timeout=self.timeout,
                 )
@@ -169,7 +186,7 @@ class ShipthisAPI:
                 response = requests.request(
                     method,
                     url,
-                    headers=headers,
+                    headers=request_headers,
                     params=query_params,
                     timeout=self.timeout,
                 )
@@ -466,16 +483,26 @@ class ShipthisAPI:
     ) -> Dict[str, Any]:
         """Patch specific fields of an item.
 
+        This is the recommended way to update document fields. It goes through
+        full field validation, workflow triggers, audit logging, and business logic.
+
         Args:
-            collection_name: Name of the collection.
+            collection_name: Name of the collection (e.g., "sea_shipment", "fcl_load").
             object_id: Document ID.
-            update_fields: Fields to update.
+            update_fields: Dictionary of field_id to value mappings.
 
         Returns:
             Updated document data.
 
         Raises:
             ShipthisAPIError: If the request fails.
+
+        Example:
+            client.patch_item(
+                "fcl_load",
+                "68a4f906743189ad061429a7",
+                update_fields={"container_no": "CONT123", "seal_no": "SEAL456"}
+            )
         """
         return self._make_request(
             "PATCH",
@@ -959,4 +986,38 @@ class ShipthisAPI:
         raise ShipthisRequestError(
             message=f"Upload failed with status {response.status_code}",
             status_code=response.status_code,
+        )
+
+    # ==================== Reference Linked Fields ====================
+
+    def create_reference_linked_field(
+        self,
+        collection_name: str,
+        doc_id: str,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Create a reference-linked field on a document.
+
+        Args:
+            collection_name: Collection name.
+            doc_id: Document ID.
+            payload: Field data to create.
+
+        Returns:
+            API response.
+
+        Raises:
+            ShipthisAPIError: If the request fails.
+
+        Example:
+            client.create_reference_linked_field(
+                "sea_shipment",
+                "68a4f906743189ad061429a7",
+                payload={"field_name": "containers", "data": {...}}
+            )
+        """
+        return self._make_request(
+            "POST",
+            f"incollection/create-reference-linked-field/{collection_name}/{doc_id}",
+            request_data=payload,
         )
