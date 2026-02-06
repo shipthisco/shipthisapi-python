@@ -483,16 +483,26 @@ class ShipthisAPI:
     ) -> Dict[str, Any]:
         """Patch specific fields of an item.
 
+        This is the recommended way to update document fields. It goes through
+        full field validation, workflow triggers, audit logging, and business logic.
+
         Args:
-            collection_name: Name of the collection.
+            collection_name: Name of the collection (e.g., "sea_shipment", "fcl_load").
             object_id: Document ID.
-            update_fields: Fields to update.
+            update_fields: Dictionary of field_id to value mappings.
 
         Returns:
             Updated document data.
 
         Raises:
             ShipthisAPIError: If the request fails.
+
+        Example:
+            client.patch_item(
+                "fcl_load",
+                "68a4f906743189ad061429a7",
+                update_fields={"container_no": "CONT123", "seal_no": "SEAL456"}
+            )
         """
         return self._make_request(
             "PATCH",
@@ -976,74 +986,6 @@ class ShipthisAPI:
         raise ShipthisRequestError(
             message=f"Upload failed with status {response.status_code}",
             status_code=response.status_code,
-        )
-
-    # ==================== Webhook Operations ====================
-
-    def webhook_sync(
-        self,
-        view_name: str,
-        doc_id: str,
-        fields: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        """Update document via webhook-sync (synchronous update).
-
-        Args:
-            view_name: View/collection name (e.g., "sea_shipment", "fcl_load").
-            doc_id: Document ID.
-            fields: List of field dicts to update.
-
-        Returns:
-            API response with success status and data.
-
-        Raises:
-            ShipthisAPIError: If the request fails.
-
-        Example:
-            client.webhook_sync(
-                "fcl_load",
-                "68a4f906743189ad061429a7",
-                fields=[{"container_no": "CONT123"}, {"seal_no": "SEAL456"}]
-            )
-        """
-        payload = {"fields": fields}
-        return self._make_request(
-            "PUT",
-            f"webhook-sync/{self.organisation_id}/{view_name}/{doc_id}",
-            request_data=payload,
-        )
-
-    def webhook_update(
-        self,
-        view_name: str,
-        doc_id: str,
-        actions: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        """Update document via webhook (async update with actions).
-
-        Args:
-            view_name: View/collection name.
-            doc_id: Document ID.
-            actions: List of action dicts to execute.
-
-        Returns:
-            API response with success status and data.
-
-        Raises:
-            ShipthisAPIError: If the request fails.
-
-        Example:
-            client.webhook_update(
-                "sea_shipment",
-                "68a4f906743189ad061429a7",
-                actions=[{"action": "update_status", "value": "completed"}]
-            )
-        """
-        payload = {"actions": actions}
-        return self._make_request(
-            "PUT",
-            f"webhook/{self.organisation_id}/{view_name}/{doc_id}",
-            request_data=payload,
         )
 
     # ==================== Reference Linked Fields ====================
