@@ -5,21 +5,12 @@ A Python client for the Shipthis public API.
 Usage:
     from ShipthisAPI import ShipthisAPI
 
-    # Standard usage with API key
+    # Initialize the client
     client = ShipthisAPI(
         organisation="your_org_id",
         x_api_key="your_api_key",
         region_id="your_region",
         location_id="your_location"
-    )
-
-    # Server-to-server usage with custom headers
-    client = ShipthisAPI(
-        organisation="your_org_id",
-        custom_headers={
-            "st-server-key": "your_server_key",
-            "st-server-name": "your_service_name",
-        }
     )
 
     # Connect and validate
