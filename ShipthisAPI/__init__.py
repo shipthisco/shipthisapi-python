@@ -1,5 +1,5 @@
 # __variables__ with double-quoted values will be available in setup.py
-__version__ = "3.0.3"
+__version__ = "3.0.4"
 
 from .shipthisapi import (
     ShipthisAPI,
