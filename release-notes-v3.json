@@ -1,0 +1,32 @@
+{
+  "title": "shipthisapi-python v3.0.0 - Async-First Release",
+  "summary": "Complete rewrite with async/await support using httpx for modern Python applications.",
+  "content": "We're excited to announce the release of **shipthisapi-python v3.0.0** - a major update that brings full async support to the library, making it perfect for modern Python applications like FastAPI and pynexus.\n\n### ✨ What's New\n- **Async-First Design**: All API methods are now async and support `await`, enabling non-blocking HTTP calls for better performance in async applications.\n- **httpx Integration**: Replaced the `requests` library with `httpx` for native async HTTP support with better connection pooling and timeout handling.\n- **Custom Headers Support**: New `custom_headers` parameter allows server-to-server authentication and custom header injection without exposing API keys.\n- **Reference Linked Fields**: New `create_reference_linked_field` method for creating linked field references on documents.\n- **Per-Request Header Override**: Override headers on individual requests for flexible authentication scenarios.\n\n### 🔧 Improvements\n- **Simplified Field Updates**: `patch_item` is now the recommended method for updating document fields, providing full field validation, workflow triggers, audit logging, and business logic execution.\n- **Optional API Key**: `x_api_key` is now optional when using `custom_headers` for authentication, enabling more flexible auth patterns.\n- **Better Error Handling**: Improved error messages and exception handling with `ShipthisAPIError`, `ShipthisAuthError`, and `ShipthisRequestError`.\n\n### ⚠️ Breaking Changes\n- All methods now require `await` - this is a breaking change from v2.x\n- Removed `webhook_sync` method - use `patch_item` instead\n- Removed `webhook_update` method - use `patch_item` instead\n- Dependency changed from `requests` to `httpx>=0.24.0`\n\n### 📖 Migration Guide\n**Before (v2.x):**\n```python\nclient = ShipthisAPI(organisation=\"org_id\", x_api_key=\"key\")\nclient.connect()\nitems = client.get_list(\"shipment\")\n```\n\n**After (v3.x):**\n```python\nclient = ShipthisAPI(organisation=\"org_id\", x_api_key=\"key\")\nawait client.connect()\nitems = await client.get_list(\"shipment\")\n```\n\nThank you for using shipthisapi-python! This release enables seamless integration with pynexus and other async Python applications.",
+  "categories": [
+    "SDK",
+    "Developer Tools",
+    "API"
+  ],
+  "update_types": [
+    "new_feature",
+    "improvement",
+    "breaking_change"
+  ],
+  "authors": [
+    "mayur-st"
+  ],
+  "version": "3.0.0",
+  "is_draft": false,
+  "since_date": "2025-02-06",
+  "until_date": "2025-02-06",
+  "from": "2025-02-06",
+  "to": "2025-02-06",
+  "commit_count": 4,
+  "repositories": [
+    "shipthisco/shipthisapi-python"
+  ],
+  "hash": "d3ab3831706dcc",
+  "created_at": {
+    "$date": "2025-02-06T00:00:00.000Z"
+  }
+}
