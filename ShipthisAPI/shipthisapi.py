@@ -321,14 +321,18 @@ class ShipthisAPI:
             params = {}
             if only_fields:
                 params["only"] = only_fields
-            return await self._make_request("GET", path, query_params=params if params else None)
+            return await self._make_request(
+                "GET", path, query_params=params if params else None
+            )
         else:
             params = {}
             if filters:
                 params["query_filter_v2"] = json.dumps(filters)
             if only_fields:
                 params["only"] = only_fields
-            resp = await self._make_request("GET", f"incollection/{collection_name}", params)
+            resp = await self._make_request(
+                "GET", f"incollection/{collection_name}", params
+            )
             if isinstance(resp, dict) and resp.get("items"):
                 return resp.get("items")[0]
             return None
@@ -378,7 +382,9 @@ class ShipthisAPI:
         if not meta:
             params["meta"] = "false"
 
-        response = await self._make_request("GET", f"incollection/{collection_name}", params)
+        response = await self._make_request(
+            "GET", f"incollection/{collection_name}", params
+        )
 
         if isinstance(response, dict):
             return response.get("items", [])
@@ -416,13 +422,25 @@ class ShipthisAPI:
         )
 
     async def create_item(
-        self, collection_name: str, data: Dict[str, Any]
+        self,
+        collection_name: str,
+        data: Dict[str, Any],
+        ignore_new_required: bool = False,
+        skip_sequence_if_exists: bool = False,
+        replicate_count: int = 0,
+        input_filters: Optional[Dict[str, Any]] = None,
+        action_op_data: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Create a new item in a collection.
+        """Create a new item in a collection with all advanced Shipthis features.
 
         Args:
             collection_name: Name of the collection.
             data: Document data.
+            ignore_new_required: Ignore new required fields (default: False).
+            skip_sequence_if_exists: Skip sequence if exists (default: False).
+            replicate_count: Number of times to replicate the item (default: 0).
+            input_filters: Input filters (optional).
+            action_op_data: Action operation data (optional).
 
         Returns:
             Created document data.
@@ -430,10 +448,26 @@ class ShipthisAPI:
         Raises:
             ShipthisAPIError: If the request fails.
         """
+        params = {}
+        if replicate_count > 0:
+            params["replicate_count"] = min(replicate_count, 100)
+        if input_filters:
+            params["input_filters"] = json.dumps(input_filters)
+
+        request_payload = {
+            "reqbody": data,
+            "ignore_new_required": ignore_new_required,
+            "skip_sequence_if_exists": skip_sequence_if_exists,
+        }
+
+        if action_op_data:
+            request_payload["action_op_data"] = action_op_data
+
         resp = await self._make_request(
             "POST",
             f"incollection/{collection_name}",
-            request_data={"reqbody": data},
+            query_params=params,
+            request_data=request_payload,
         )
         if isinstance(resp, dict) and resp.get("data"):
             return resp.get("data")
@@ -646,6 +680,7 @@ class ShipthisAPI:
             ShipthisAPIError: If the request fails.
         """
         import time
+
         if date is None:
             date = int(time.time() * 1000)
 
