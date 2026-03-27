@@ -107,6 +107,7 @@ class ShipthisAPI:
         self.custom_headers = custom_headers or {}
         self.organisation_info = None
         self.is_connected = False
+        self._client: httpx.AsyncClient = None
 
     def set_region_location(self, region_id: str, location_id: str) -> None:
         """Set the region and location for subsequent requests.
@@ -146,6 +147,19 @@ class ShipthisAPI:
             headers.update(override_headers)
         return headers
 
+    async def _ensure_client(self) -> httpx.AsyncClient:
+        """Get or create the shared HTTP client."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=self.timeout)
+        return self._client
+
+    async def __aenter__(self):
+        await self.connect()
+        return self
+
+    async def __aexit__(self, *args):
+        await self.disconnect()
+
     async def _make_request(
         self,
         method: str,
@@ -172,31 +186,31 @@ class ShipthisAPI:
         """
         url = self.base_api_endpoint + path
         request_headers = self._get_headers(headers)
+        client = await self._ensure_client()
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            try:
-                response = await client.request(
-                    method,
-                    url,
-                    headers=request_headers,
-                    params=query_params,
-                    json=request_data,
-                )
-            except httpx.TimeoutException:
-                raise ShipthisRequestError(
-                    message="Request timed out",
-                    status_code=408,
-                )
-            except httpx.ConnectError as e:
-                raise ShipthisRequestError(
-                    message=f"Connection error: {str(e)}",
-                    status_code=0,
-                )
-            except httpx.RequestError as e:
-                raise ShipthisRequestError(
-                    message=f"Request failed: {str(e)}",
-                    status_code=0,
-                )
+        try:
+            response = await client.request(
+                method,
+                url,
+                headers=request_headers,
+                params=query_params,
+                json=request_data,
+            )
+        except httpx.TimeoutException:
+            raise ShipthisRequestError(
+                message="Request timed out",
+                status_code=408,
+            )
+        except httpx.ConnectError as e:
+            raise ShipthisRequestError(
+                message=f"Connection error: {str(e)}",
+                status_code=0,
+            )
+        except httpx.RequestError as e:
+            raise ShipthisRequestError(
+                message=f"Request failed: {str(e)}",
+                status_code=0,
+            )
 
         # Handle authentication errors
         if response.status_code == 401:
@@ -275,9 +289,13 @@ class ShipthisAPI:
             "organisation": self.organisation_info,
         }
 
-    def disconnect(self) -> None:
-        """Disconnect and clear credentials."""
+    async def disconnect(self) -> None:
+        """Disconnect, close the HTTP client, and clear credentials."""
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
         self.x_api_key = None
+        self.organisation_info = None
         self.is_connected = False
 
     # ==================== Info ====================
@@ -505,9 +523,10 @@ class ShipthisAPI:
         self,
         collection_name: str,
         object_id: str,
-        update_fields: Dict[str, Any],
+        update_fields: Dict[str, Any] = None,
+        workflow: List[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Patch specific fields of an item.
+        """Patch specific fields of an item and/or trigger workflow transitions.
 
         This is the recommended way to update document fields. It goes through
         full field validation, workflow triggers, audit logging, and business logic.
@@ -516,24 +535,57 @@ class ShipthisAPI:
             collection_name: Name of the collection (e.g., "sea_shipment", "fcl_load").
             object_id: Document ID.
             update_fields: Dictionary of field_id to value mappings.
+            workflow: List of workflow actions to execute. Each action is a dict with:
+                - workflow_id (str): The workflow identifier (e.g., "status").
+                - value (str, optional): Target state for direct-mode workflows.
+                - action_id (str, optional): Action ID for action-based workflows.
+                - payload (any, optional): Extra data for the action.
 
         Returns:
-            Updated document data.
+            Updated document data and/or workflow results.
 
         Raises:
             ShipthisAPIError: If the request fails.
 
         Example:
+            # Update fields only
             await client.patch_item(
                 "fcl_load",
                 "68a4f906743189ad061429a7",
                 update_fields={"container_no": "CONT123", "seal_no": "SEAL456"}
             )
+
+            # Workflow transition only (direct mode)
+            await client.patch_item(
+                "sea_shipment",
+                "68a4f906743189ad061429a7",
+                workflow=[{"workflow_id": "status", "value": "approved"}]
+            )
+
+            # Workflow transition only (action-based)
+            await client.patch_item(
+                "sea_shipment",
+                "68a4f906743189ad061429a7",
+                workflow=[{"workflow_id": "status", "action_id": "submit_review"}]
+            )
+
+            # Fields + workflow in one call
+            await client.patch_item(
+                "sea_shipment",
+                "68a4f906743189ad061429a7",
+                update_fields={"notes": "ready"},
+                workflow=[{"workflow_id": "status", "action_id": "submit_review"}]
+            )
         """
+        request_data = {}
+        if update_fields is not None:
+            request_data["update_fields"] = update_fields
+        if workflow is not None:
+            request_data["workflow"] = workflow
         return await self._make_request(
             "PATCH",
             f"incollection/{collection_name}/{object_id}",
-            request_data={"update_fields": update_fields},
+            request_data=request_data,
         )
 
     async def delete_item(self, collection_name: str, object_id: str) -> Dict[str, Any]:
@@ -686,7 +738,12 @@ class ShipthisAPI:
 
         return await self._make_request(
             "GET",
-            f"thirdparty/currency?source={source_currency}&target={target_currency}&date={date}",
+            "thirdparty/currency",
+            query_params={
+                "source": source_currency,
+                "target": target_currency,
+                "date": date,
+            },
         )
 
     async def autocomplete(
@@ -731,7 +788,8 @@ class ShipthisAPI:
         """
         return await self._make_request(
             "GET",
-            f"thirdparty/search-place-autocomplete?query={query}",
+            "thirdparty/search-place-autocomplete",
+            query_params={"query": query},
         )
 
     async def get_place_details(
@@ -753,7 +811,8 @@ class ShipthisAPI:
         """
         return await self._make_request(
             "GET",
-            f"thirdparty/select-google-place?query={place_id}&description={description}",
+            "thirdparty/select-google-place",
+            query_params={"query": place_id, "description": description},
         )
 
     # ==================== Conversations ====================
@@ -987,8 +1046,8 @@ class ShipthisAPI:
         try:
             with open(file_path, "rb") as f:
                 files = {"file": (file_name, f)}
-                async with httpx.AsyncClient(timeout=self.timeout * 2) as client:
-                    response = await client.post(
+                async with httpx.AsyncClient(timeout=self.timeout * 2) as upload_client:
+                    response = await upload_client.post(
                         upload_url,
                         headers=headers,
                         files=files,
