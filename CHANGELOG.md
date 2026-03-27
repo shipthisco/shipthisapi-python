@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.0] - 2026-03-27
+
+### Added
+- Workflow transitions support in `patch_item` — update fields and trigger workflow actions in a single call
+- Async context manager support (`async with ShipthisAPI(...) as client:`)
+- Persistent HTTP client with connection pooling for better performance
+
+### Changed
+- `disconnect()` is now async and properly closes the HTTP client
+- `upload_file` keeps its own client (separate upload host)
+
+### Fixed
+- Query parameters in `get_exchange_rate`, `search_location`, and `get_place_details` now use proper URL encoding instead of string interpolation
+
 ## [3.0.0] - 2025-02-06
 
 ### Breaking Changes
