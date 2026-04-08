@@ -581,7 +581,7 @@ class ShipthisAPI:
         if update_fields is not None:
             request_data["update_fields"] = update_fields
         if workflow is not None:
-            request_data["workflow"] = workflow
+            request_data["workflows"] = workflow
         return await self._make_request(
             "PATCH",
             f"incollection/{collection_name}/{object_id}",
