@@ -672,9 +672,9 @@ class ShipthisAPI:
     async def get_report_view(
         self,
         report_name: str,
-        start_date: str,
-        end_date: str,
-        post_data: Dict[str, Any] = None,
+        start_date_iso: str,
+        end_date_iso: str,
+        filters: Dict[str, Any] = None,
         output_type: str = "json",
         skip_meta: bool = True,
     ) -> Dict[str, Any]:
@@ -682,9 +682,9 @@ class ShipthisAPI:
 
         Args:
             report_name: Name of the report.
-            start_date: Start date (YYYY-MM-DD or timestamp).
-            end_date: End date (YYYY-MM-DD or timestamp).
-            post_data: Additional filter data (optional).
+            start_date_iso: Start date in ISO 8601 format (e.g. 2026-04-01T00:00:00.000Z).
+            end_date_iso: End date in ISO 8601 format (e.g. 2027-03-31T23:59:59.999Z).
+            filters: Optional query_filter_v2 dict to filter report rows.
             output_type: Output format (default: "json").
             skip_meta: Skip metadata (default: True).
 
@@ -695,19 +695,21 @@ class ShipthisAPI:
             ShipthisAPIError: If the request fails.
         """
         params = {
-            "start_date": start_date,
-            "end_date": end_date,
+            "start_date_iso": start_date_iso,
+            "end_date_iso": end_date_iso,
             "output_type": output_type,
             "skip_meta": "true" if skip_meta else "false",
         }
         if self.location_id:
             params["location"] = self.location_id
+        if filters:
+            params["query_filter_v2"] = json.dumps(filters)
 
         return await self._make_request(
             "POST",
             f"report-view/{report_name}",
             query_params=params,
-            request_data=post_data,
+            request_data={"user_filter": filters or {}},
         )
 
     # ==================== Third-party Services ====================
